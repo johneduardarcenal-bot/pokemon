@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>The Lonely Bone</title>
+    <style>
+        body { margin: 0; background-color: #000; color: white; font-family: sans-serif; overflow: hidden; touch-action: none; }
+        
+        #game-world { 
+            position: absolute; inset: 0; 
+            background-color: #1a0033;
+            background-size: cover; 
+            background-position: center;
+            image-rendering: pixelated;
+            z-index: 1;
+        }
+
+        canvas { position: absolute; inset: 0; z-index: 10; image-rendering: pixelated; pointer-events: none; }
+        
+        #ui-layer { position: absolute; bottom: 100px; left: 50%; transform: translateX(-50%); width: 90%; display: none; z-index: 100; }
+        .dialogue-box { background-color: #fff; border: 4px solid #555; border-radius: 12px; padding: 15px; color: #000; font-size: 16px; font-weight: bold; box-shadow: 0 4px 0 #000; }
+        
+        #dpad { position: absolute; bottom: 20px; left: 20px; width: 140px; height: 140px; display: none; z-index: 150; }
+        .dpad-btn { position: absolute; width: 45px; height: 45px; background: rgba(255,255,255,0.3); border: 2px solid #fff; border-radius: 10px; display: flex; justify-content: center; align-items: center; font-size: 24px; color: white; pointer-events: auto; }
+        #btn-up { top: 0; left: 47px; } #btn-down { bottom: 0; left: 47px; } #btn-left { top: 47px; left: 0; } #btn-right { top: 47px; right: 0; }
+
+        #tcg-screen { display: none; position: absolute; inset: 0; background: radial-gradient(circle, #4a148c 0%, #120024 100%); z-index: 200; flex-direction: column; justify-content: center; align-items: center; opacity: 0; transition: opacity 1s; }
+        #pack-wrapper { position: relative; width: 220px; height: 320px; display: none; cursor: pointer; animation: float 3s infinite; }
+        .pack-half { position: absolute; width: 100%; height: 50%; background-image: url('The Booster Pack (Closed).jpg'); background-size: 100% 200%; transition: transform 0.7s; }
+        .pack-top { top: 0; background-position: top; } .pack-bottom { bottom: 0; background-position: bottom; }
+        .ripped .pack-top { transform: translateY(-300px); opacity: 0; } .ripped .pack-bottom { transform: translateY(300px); opacity: 0; }
+
+        #filler-card { display: none; width: 280px; height: 400px; background-image: url('TCG Common Uncommon Filler Cards_Vertical Aspect Ratio.png'); background-size: 200% 200%; border-radius: 15px; box-shadow: 0 0 40px rgba(255,255,255,0.2); z-index: 210; cursor: pointer; }
+        #reward-card { display: none; height: 380px; border-radius: 15px; animation: float 3s infinite, glow 2s alternate infinite; z-index: 205; }
+
+        .card-pop { animation: pop 0.5s cubic-bezier(0.17, 0.88, 0.32, 1.2) forwards; }
+        .card-disappear { animation: fadeOut 0.3s ease-in forwards; }
+
+        #start-overlay { position: absolute; inset: 0; background: rgba(0,0,0,0.8); z-index: 300; display: flex; flex-direction: column; justify-content: center; align-items: center; cursor: pointer; }
+        
+        /* ENDING SCREEN */
+        #ending-screen { display: none; position: absolute; inset: 0; background: #000; z-index: 400; flex-direction: column; justify-content: center; align-items: center; text-align: center; padding: 20px; opacity: 0; transition: opacity 2s ease-in; }
+        #ending-screen p { font-family: 'Courier New', monospace; font-size: 18px; line-height: 1.6; margin: 10px 0; }
+
+        @keyframes pop { from { transform: scale(0.4); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+        @keyframes fadeOut { to { transform: scale(1.1); opacity: 0; } }
+        @keyframes float { 0%, 100% { transform: translateY(0px); } 50% { transform: translateY(-15px); } }
+        @keyframes glow { from { filter: drop-shadow(0 0 5px gold); } to { filter: drop-shadow(0 0 25px gold); } }
+    </style>
+</head>
+<body>
+
+    <div id="start-overlay">
+        <h1 style="letter-spacing: 2px;">THE LONELY BONE</h1>
+        <p>Click/Tap to Start</p>
+    </div>
+
+    <div id="game-world"></div>
+    <canvas id="gameCanvas"></canvas>
+
+    <div id="dpad">
+        <div class="dpad-btn" id="btn-up">▲</div>
+        <div class="dpad-btn" id="btn-left">◀</div>
+        <div class="dpad-btn" id="btn-right">▶</div>
+        <div class="dpad-btn" id="btn-down">▼</div>
+    </div>
+
+    <div id="ui-layer"><div class="dialogue-box" id="text-box"></div></div>
+
+    <div id="tcg-screen">
+        <h2 id="tcg-title" style="margin-bottom: 20px; text-shadow: 0 0 10px #fff;"></h2>
+        <div id="pack-wrapper"><div class="pack-half pack-top"></div><div class="pack-half pack-bottom"></div></div>
+        <div id="filler-card"></div>
+        <img id="reward-card" src="Cubone Lovers Card.jpg">
+    </div>
+
+    <div id="ending-screen">
+        <p>I know how much you wanted the Cubone Lovers card...</p>
+        <p>It was out of my budget right now,</p>
+        <p>so I built this game for you instead.</p>
+        <p style="margin-top: 40px; font-size: 24px; color: gold; font-weight: bold;">Hope you love it!</p>
+    </div>
+
+    <script>
+        const world = document.getElementById('game-world');
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        // AUDIO SETUP
+        const audioBGM = new Audio('bgm.mp3'); audioBGM.loop = true;
+        const audioRip = new Audio('rip.mp3');
+        const audioCard = new Audio('card.mp3');
+        const audioWin = new Audio('victory.mp3');
+
+        let state = 'START', scene = 'VILLAGE', quest = 'OLD_MAN', tick = 0, trail = [], fillerIdx = 0, isCardMoving = false;
+        const assets = {};
+        const fileList = [
+            { id: 'pImg', src: 'main character.png' },
+            { id: 'npc', src: 'old man npc.png' },
+            { id: 'c1', src: 'cubone weeping.png' },
+            { id: 'c2', src: 'cubone scared and walking.png' }
+        ];
+
+        fileList.forEach(file => { assets[file.id] = new Image(); assets[file.id].src = file.src; });
+
+        const player = { x: 0, y: 0, fX: 0, fY: 0, w: 90, h: 120 };
+        const keys = {};
+
+        function updateWorldView() {
+            const bgUrl = (scene === 'VILLAGE') ? 'Background.png' : 'graveyard background.png';
+            world.style.backgroundImage = `url('${bgUrl}')`;
+        }
+
+        function resize() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            if (state === 'START') { player.x = canvas.width/2 - 45; player.y = canvas.height * 0.7; }
+        }
+        window.addEventListener('resize', resize);
+
+        document.getElementById('start-overlay').onclick = () => {
+            state = 'PLAY';
+            document.getElementById('start-overlay').style.display = 'none';
+            document.getElementById('dpad').style.display = 'block';
+            updateWorldView();
+            resize();
+            audioBGM.play().catch(e => console.log("Audio not found or blocked."));
+        };
+
+        const btn = (id, k) => {
+            const el = document.getElementById(id);
+            el.onmousedown = el.ontouchstart = (e) => { e.preventDefault(); keys[k] = true; };
+            el.onmouseup = el.ontouchend = (e) => { e.preventDefault(); keys[k] = false; };
+        };
+        btn('btn-up','w'); btn('btn-down','s'); btn('btn-left','a'); btn('btn-right','d');
+
+        function type(txt, cb) {
+            state = 'TALK';
+            document.getElementById('ui-layer').style.display = 'block';
+            const el = document.getElementById('text-box');
+            let i = 0; el.innerHTML = "";
+            const timer = setInterval(() => {
+                el.innerHTML += txt[i]; i++;
+                if (i >= txt.length) {
+                    clearInterval(timer);
+                    setTimeout(() => { document.getElementById('ui-layer').style.display='none'; state='PLAY'; if(cb) cb(); }, 2000);
+                }
+            }, 40);
+        }
+
+        function update() {
+            if (state !== 'PLAY') return;
+            tick++;
+            let mv = 6, moving = false;
+            let nx = player.x, ny = player.y;
+
+            if (keys.w) { ny -= mv; player.fY = 1; moving = true; }
+            if (keys.s) { ny += mv; player.fY = 0; moving = true; }
+            if (keys.a) { nx -= mv; player.fY = 3; moving = true; }
+            if (keys.d) { nx += mv; player.fY = 2; moving = true; }
+
+            if (nx > 0 && nx < canvas.width - 80 && ny > 0 && ny < canvas.height - 100) {
+                player.x = nx; player.y = ny;
+                if (moving) { trail.push({x: nx, y: ny}); if (trail.length > 20) trail.shift(); }
+            }
+
+            if (moving && tick % 6 === 0) player.fX = (player.fX + 1) % 10;
+            if (!moving) player.fX = 0;
+
+            const dist = (x1, y1, x2, y2) => Math.hypot(x1-x2, y1-y2);
+            
+            if (scene === 'VILLAGE') {
+                if (dist(player.x, player.y, canvas.width*0.25, canvas.height*0.5) < 100) {
+                    if (quest === 'OLD_MAN') {
+                        type("Old Man: My Cubone is crying... its friend is lost in the Grave! Find them.", () => {
+                            quest = 'SEARCH'; scene = 'GRAVEYARD'; updateWorldView();
+                            player.x = canvas.width/2 - 45; player.y = canvas.height-150;
+                        });
+                    } else if (quest === 'FOLLOW') {
+                        type("Old Man: You found the companion! Go to the weeping Cubone near the bench.", () => { quest = 'FINALE'; });
+                    }
+                }
+                if (dist(player.x, player.y, canvas.width*0.8, canvas.height*0.6) < 100 && quest === 'FINALE') {
+                    type("Reunited! Here is a pack for your kindness...", () => {
+                        state='TCG';
+                        audioBGM.pause(); // Stops the background music here!
+                        document.getElementById('tcg-screen').style.display='flex';
+                        setTimeout(() => document.getElementById('tcg-screen').style.opacity='1', 50);
+                        document.getElementById('tcg-title').innerText = "RIP THE PACK!";
+                        document.getElementById('pack-wrapper').style.display='block';
+                    });
+                }
+            } else if (scene === 'GRAVEYARD' && player.y < canvas.height*0.4 && quest === 'SEARCH') {
+                type("You found the lonely Cubone! It follows you back home.", () => {
+                    quest = 'FOLLOW'; scene = 'VILLAGE'; updateWorldView();
+                    player.x = canvas.width/2 - 45; player.y = canvas.height * 0.5; trail = [];
+                });
+            }
+        }
+
+        function draw() {
+            ctx.clearRect(0,0,canvas.width,canvas.height);
+            if (state === 'PLAY' || state === 'TALK') {
+                const drawS = (img, xc, yc, row, x, y, w, h, frame) => {
+                    if (img.complete && img.width > 0) {
+                        let sw = img.width/xc, sh = img.height/yc;
+                        ctx.drawImage(img, frame*sw, row*sh, sw, sh, x, y, w, h);
+                    }
+                };
+                if (quest === 'FOLLOW' || quest === 'FINALE') {
+                    if (trail.length > 15) drawS(assets.c2, 4, 2, 1, trail[0].x, trail[0].y, 70, 70, (tick%32<16?0:1));
+                }
+                drawS(assets.pImg, 10, 4, player.fY, player.x, player.y, 90, 110, player.fX);
+                if (scene === 'VILLAGE') {
+                    drawS(assets.npc, 4, 1, 0, canvas.width*0.25, canvas.height*0.5, 80, 100, (Math.floor(tick/12)%4));
+                    drawS(assets.c1, 1, 1, 0, canvas.width*0.8, canvas.height*0.6, 70, 70, 0);
+                } else if (scene === 'GRAVEYARD' && quest === 'SEARCH') {
+                    drawS(assets.c2, 4, 2, 1, canvas.width/2 - 35, canvas.height*0.3, 70, 70, (Math.floor(tick/8)%4));
+                }
+            }
+            requestAnimationFrame(draw);
+        }
+
+        document.getElementById('pack-wrapper').onclick = function() {
+            audioRip.play().catch(e => console.log("Audio block"));
+            this.classList.add('ripped');
+            setTimeout(() => {
+                this.style.display = 'none';
+                document.getElementById('tcg-title').innerText = "REVEAL CARDS...";
+                const f = document.getElementById('filler-card');
+                f.style.display = 'block';
+                f.classList.add('card-pop');
+                audioCard.play().catch(e => console.log("Audio block"));
+            }, 800);
+        };
+
+        document.getElementById('filler-card').onclick = function() {
+            if (isCardMoving) return;
+            isCardMoving = true;
+            this.classList.add('card-disappear');
+            
+            setTimeout(() => {
+                fillerIdx++;
+                if (fillerIdx < 2) {
+                    this.style.backgroundPosition = '100% 0%';
+                    this.classList.remove('card-disappear', 'card-pop');
+                    void this.offsetWidth; 
+                    this.classList.add('card-pop');
+                    audioCard.play().catch(e => console.log("Audio block"));
+                    setTimeout(() => isCardMoving = false, 500);
+                } else {
+                    this.style.display = 'none';
+                    document.getElementById('tcg-title').innerText = "SECRET RARE PULL!";
+                    document.getElementById('reward-card').style.display = 'block';
+                    
+                    audioWin.play().catch(e => console.log("Audio block"));
+                    
+                    setTimeout(() => {
+                        const ending = document.getElementById('ending-screen');
+                        ending.style.display = 'flex';
+                        setTimeout(() => ending.style.opacity = '1', 100);
+                    }, 4000);
+                }
+            }, 300);
+        };
+
+        setInterval(update, 1000/60);
+        resize();
+        draw();
+    </script>
+</body>
+</html>
